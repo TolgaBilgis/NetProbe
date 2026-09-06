@@ -1,9 +1,13 @@
+#include <arpa/inet.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #define DEFAULT_PORT 9000
+#define LISTEN_BACKLOG 16
 
 typedef enum {
     MODE_NONE = 0,
@@ -82,6 +86,44 @@ static int parse_args(int argc, char **argv, netprobe_config *config)
     return 0;
 }
 
+static int open_listen_socket(int port)
+{
+    struct sockaddr_in address;
+    int fd;
+    int reuse = 1;
+
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+        perror("setsockopt");
+        close(fd);
+        return -1;
+    }
+
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_port = htons((unsigned short)port);
+
+    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind");
+        close(fd);
+        return -1;
+    }
+
+    if (listen(fd, LISTEN_BACKLOG) < 0) {
+        perror("listen");
+        close(fd);
+        return -1;
+    }
+
+    return fd;
+}
+
 int main(int argc, char **argv)
 {
     netprobe_config config;
@@ -92,7 +134,14 @@ int main(int argc, char **argv)
     }
 
     if (config.mode == MODE_SERVER) {
-        printf("Server mode on port %d\n", config.port);
+        int listen_fd = open_listen_socket(config.port);
+
+        if (listen_fd < 0) {
+            return 1;
+        }
+
+        printf("Listening on port %d\n", config.port);
+        close(listen_fd);
     } else {
         printf("Client mode targeting %s:%d\n", config.host, config.port);
     }
