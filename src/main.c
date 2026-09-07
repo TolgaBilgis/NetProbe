@@ -124,6 +124,39 @@ static int open_listen_socket(int port)
     return fd;
 }
 
+static int run_server(int port)
+{
+    int listen_fd = open_listen_socket(port);
+
+    if (listen_fd < 0) {
+        return -1;
+    }
+
+    printf("Listening on port %d\n", port);
+
+    for (;;) {
+        struct sockaddr_in peer;
+        socklen_t peer_len = sizeof(peer);
+        int client_fd = accept(listen_fd, (struct sockaddr *)&peer, &peer_len);
+
+        if (client_fd < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("accept");
+            close(listen_fd);
+            return -1;
+        }
+
+        char address[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &peer.sin_addr, address, sizeof(address)) != NULL) {
+            printf("Accepted connection from %s:%u\n", address, ntohs(peer.sin_port));
+        }
+
+        close(client_fd);
+    }
+}
+
 int main(int argc, char **argv)
 {
     netprobe_config config;
@@ -134,14 +167,9 @@ int main(int argc, char **argv)
     }
 
     if (config.mode == MODE_SERVER) {
-        int listen_fd = open_listen_socket(config.port);
-
-        if (listen_fd < 0) {
+        if (run_server(config.port) != 0) {
             return 1;
         }
-
-        printf("Listening on port %d\n", config.port);
-        close(listen_fd);
     } else {
         printf("Client mode targeting %s:%d\n", config.host, config.port);
     }
