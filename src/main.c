@@ -9,6 +9,7 @@
 
 #define DEFAULT_PORT 9000
 #define LISTEN_BACKLOG 16
+#define IO_BUFFER_SIZE 4096
 
 typedef enum {
     MODE_NONE = 0,
@@ -168,6 +169,57 @@ static int open_client_socket(const char *host, int port)
     return fd;
 }
 
+static int send_all(int fd, const void *buffer, size_t length)
+{
+    const unsigned char *data = buffer;
+    size_t sent = 0;
+
+    while (sent < length) {
+        ssize_t rc = send(fd, data + sent, length - sent, 0);
+
+        if (rc < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+
+        if (rc == 0) {
+            return -1;
+        }
+
+        sent += (size_t)rc;
+    }
+
+    return 0;
+}
+
+static int echo_client(int fd)
+{
+    unsigned char buffer[IO_BUFFER_SIZE];
+
+    for (;;) {
+        ssize_t received = recv(fd, buffer, sizeof(buffer), 0);
+
+        if (received == 0) {
+            return 0;
+        }
+
+        if (received < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("recv");
+            return -1;
+        }
+
+        if (send_all(fd, buffer, (size_t)received) != 0) {
+            perror("send");
+            return -1;
+        }
+    }
+}
+
 static int run_server(int port)
 {
     int listen_fd = open_listen_socket(port);
@@ -197,6 +249,7 @@ static int run_server(int port)
             printf("Accepted connection from %s:%u\n", address, ntohs(peer.sin_port));
         }
 
+        echo_client(client_fd);
         close(client_fd);
     }
 }
