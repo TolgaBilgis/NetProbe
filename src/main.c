@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <errno.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,6 +125,49 @@ static int open_listen_socket(int port)
     return fd;
 }
 
+static int open_client_socket(const char *host, int port)
+{
+    struct addrinfo hints;
+    struct addrinfo *result;
+    struct addrinfo *entry;
+    char service[6];
+    int fd = -1;
+    int rc;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    snprintf(service, sizeof(service), "%d", port);
+    rc = getaddrinfo(host, service, &hints, &result);
+    if (rc != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rc));
+        return -1;
+    }
+
+    for (entry = result; entry != NULL; entry = entry->ai_next) {
+        fd = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
+        if (fd < 0) {
+            continue;
+        }
+
+        if (connect(fd, entry->ai_addr, entry->ai_addrlen) == 0) {
+            break;
+        }
+
+        close(fd);
+        fd = -1;
+    }
+
+    freeaddrinfo(result);
+
+    if (fd < 0) {
+        fprintf(stderr, "Unable to connect to %s:%d\n", host, port);
+    }
+
+    return fd;
+}
+
 static int run_server(int port)
 {
     int listen_fd = open_listen_socket(port);
@@ -157,6 +201,19 @@ static int run_server(int port)
     }
 }
 
+static int run_client(const char *host, int port)
+{
+    int fd = open_client_socket(host, port);
+
+    if (fd < 0) {
+        return -1;
+    }
+
+    printf("Connected to %s:%d\n", host, port);
+    close(fd);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     netprobe_config config;
@@ -171,7 +228,9 @@ int main(int argc, char **argv)
             return 1;
         }
     } else {
-        printf("Client mode targeting %s:%d\n", config.host, config.port);
+        if (run_client(config.host, config.port) != 0) {
+            return 1;
+        }
     }
 
     return 0;
