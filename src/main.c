@@ -5,11 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #define DEFAULT_PORT 9000
 #define LISTEN_BACKLOG 16
 #define IO_BUFFER_SIZE 4096
+#define LATENCY_SAMPLES 20
 
 typedef enum {
     MODE_NONE = 0,
@@ -194,6 +196,31 @@ static int send_all(int fd, const void *buffer, size_t length)
     return 0;
 }
 
+static int recv_all(int fd, void *buffer, size_t length)
+{
+    unsigned char *data = buffer;
+    size_t received = 0;
+
+    while (received < length) {
+        ssize_t rc = recv(fd, data + received, length - received, 0);
+
+        if (rc < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+
+        if (rc == 0) {
+            return -1;
+        }
+
+        received += (size_t)rc;
+    }
+
+    return 0;
+}
+
 static int echo_client(int fd)
 {
     unsigned char buffer[IO_BUFFER_SIZE];
@@ -218,6 +245,54 @@ static int echo_client(int fd)
             return -1;
         }
     }
+}
+
+static double elapsed_ms(const struct timespec *start, const struct timespec *end)
+{
+    double seconds = (double)(end->tv_sec - start->tv_sec);
+    double nanoseconds = (double)(end->tv_nsec - start->tv_nsec);
+
+    return seconds * 1000.0 + nanoseconds / 1000000.0;
+}
+
+static int measure_latency(int fd)
+{
+    unsigned char probe = 0;
+    unsigned char response;
+    double total_ms = 0.0;
+    int i;
+
+    for (i = 0; i < LATENCY_SAMPLES; i++) {
+        struct timespec start;
+        struct timespec end;
+
+        if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+            perror("clock_gettime");
+            return -1;
+        }
+
+        if (send_all(fd, &probe, sizeof(probe)) != 0) {
+            perror("send");
+            return -1;
+        }
+
+        if (recv_all(fd, &response, sizeof(response)) != 0) {
+            fprintf(stderr, "Connection closed during latency test\n");
+            return -1;
+        }
+
+        if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
+            perror("clock_gettime");
+            return -1;
+        }
+
+        total_ms += elapsed_ms(&start, &end);
+        probe++;
+    }
+
+    printf("Latency average: %.3f ms (%d samples)\n", total_ms / LATENCY_SAMPLES,
+           LATENCY_SAMPLES);
+    return 0;
 }
 
 static int run_server(int port)
@@ -263,6 +338,12 @@ static int run_client(const char *host, int port)
     }
 
     printf("Connected to %s:%d\n", host, port);
+
+    if (measure_latency(fd) != 0) {
+        close(fd);
+        return -1;
+    }
+
     close(fd);
     return 0;
 }
