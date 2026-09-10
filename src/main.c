@@ -8,6 +8,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "stats.h"
+
 #define DEFAULT_PORT 9000
 #define LISTEN_BACKLOG 16
 #define IO_BUFFER_SIZE 4096
@@ -259,7 +261,8 @@ static int measure_latency(int fd)
 {
     unsigned char probe = 0;
     unsigned char response;
-    double total_ms = 0.0;
+    double samples[LATENCY_SAMPLES];
+    latency_stats stats;
     int i;
 
     for (i = 0; i < LATENCY_SAMPLES; i++) {
@@ -286,12 +289,22 @@ static int measure_latency(int fd)
             return -1;
         }
 
-        total_ms += elapsed_ms(&start, &end);
+        samples[i] = elapsed_ms(&start, &end);
         probe++;
     }
 
-    printf("Latency average: %.3f ms (%d samples)\n", total_ms / LATENCY_SAMPLES,
-           LATENCY_SAMPLES);
+    if (calculate_latency_stats(samples, LATENCY_SAMPLES, &stats) != 0) {
+        fprintf(stderr, "Unable to calculate latency statistics\n");
+        return -1;
+    }
+
+    printf("Latency\n");
+    printf("  min  %.3f ms\n", stats.min_ms);
+    printf("  avg  %.3f ms\n", stats.avg_ms);
+    printf("  p95  %.3f ms\n", stats.p95_ms);
+    printf("  p99  %.3f ms\n", stats.p99_ms);
+    printf("  max  %.3f ms\n", stats.max_ms);
+
     return 0;
 }
 

@@ -4,7 +4,7 @@ CPPFLAGS ?= -Iinclude -D_POSIX_C_SOURCE=200809L
 LDLIBS ?= -pthread
 
 TARGET := netprobe
-SRC := src/main.c
+SRC := src/main.c src/stats.c
 OBJ := $(SRC:.c=.o)
 
 .PHONY: all clean
