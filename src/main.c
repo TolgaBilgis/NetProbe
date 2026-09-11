@@ -21,6 +21,11 @@ typedef enum {
     MODE_CLIENT
 } netprobe_mode;
 
+typedef enum {
+    COMMAND_LATENCY = 1,
+    COMMAND_THROUGHPUT = 2
+} netprobe_command;
+
 typedef struct {
     netprobe_mode mode;
     const char *host;
@@ -249,6 +254,47 @@ static int echo_client(int fd)
     }
 }
 
+static int drain_client(int fd)
+{
+    unsigned char buffer[IO_BUFFER_SIZE];
+
+    for (;;) {
+        ssize_t received = recv(fd, buffer, sizeof(buffer), 0);
+
+        if (received == 0) {
+            return 0;
+        }
+
+        if (received < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("recv");
+            return -1;
+        }
+    }
+}
+
+static int handle_client(int fd)
+{
+    unsigned char command;
+
+    if (recv_all(fd, &command, sizeof(command)) != 0) {
+        fprintf(stderr, "Connection closed before benchmark command\n");
+        return -1;
+    }
+
+    switch ((netprobe_command)command) {
+    case COMMAND_LATENCY:
+        return echo_client(fd);
+    case COMMAND_THROUGHPUT:
+        return drain_client(fd);
+    default:
+        fprintf(stderr, "Unknown benchmark command: %u\n", command);
+        return -1;
+    }
+}
+
 static double elapsed_ms(const struct timespec *start, const struct timespec *end)
 {
     double seconds = (double)(end->tv_sec - start->tv_sec);
@@ -259,11 +305,17 @@ static double elapsed_ms(const struct timespec *start, const struct timespec *en
 
 static int measure_latency(int fd)
 {
+    unsigned char command = COMMAND_LATENCY;
     unsigned char probe = 0;
     unsigned char response;
     double samples[LATENCY_SAMPLES];
     latency_stats stats;
     int i;
+
+    if (send_all(fd, &command, sizeof(command)) != 0) {
+        perror("send");
+        return -1;
+    }
 
     for (i = 0; i < LATENCY_SAMPLES; i++) {
         struct timespec start;
@@ -337,7 +389,7 @@ static int run_server(int port)
             printf("Accepted connection from %s:%u\n", address, ntohs(peer.sin_port));
         }
 
-        echo_client(client_fd);
+        handle_client(client_fd);
         close(client_fd);
     }
 }
