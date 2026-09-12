@@ -12,9 +12,10 @@
 
 #define DEFAULT_PORT 9000
 #define DEFAULT_DURATION 10.0
+#define DEFAULT_BUFFER_SIZE 65536
+#define MAX_BUFFER_SIZE (16 * 1024 * 1024)
 #define LISTEN_BACKLOG 16
 #define IO_BUFFER_SIZE 4096
-#define THROUGHPUT_BUFFER_SIZE 65536
 #define LATENCY_SAMPLES 20
 
 typedef enum {
@@ -33,13 +34,14 @@ typedef struct {
     const char *host;
     int port;
     double duration;
+    size_t buffer_size;
 } netprobe_config;
 
 static void print_usage(const char *program)
 {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  %s server [--port PORT]\n", program);
-    fprintf(stderr, "  %s client <host> [--port PORT] [--duration SECONDS]\n", program);
+    fprintf(stderr, "  %s client <host> [--port PORT] [--duration SECONDS] [--buffer-size BYTES]\n", program);
 }
 
 static int parse_port(const char *value, int *port)
@@ -72,6 +74,21 @@ static int parse_duration(const char *value, double *duration)
     return 0;
 }
 
+static int parse_buffer_size(const char *value, size_t *buffer_size)
+{
+    char *end = NULL;
+    unsigned long parsed;
+
+    errno = 0;
+    parsed = strtoul(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' || parsed == 0 || parsed > MAX_BUFFER_SIZE) {
+        return -1;
+    }
+
+    *buffer_size = (size_t)parsed;
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, netprobe_config *config)
 {
     int i;
@@ -80,6 +97,7 @@ static int parse_args(int argc, char **argv, netprobe_config *config)
     config->host = NULL;
     config->port = DEFAULT_PORT;
     config->duration = DEFAULT_DURATION;
+    config->buffer_size = DEFAULT_BUFFER_SIZE;
 
     if (argc < 2) {
         return -1;
@@ -112,6 +130,15 @@ static int parse_args(int argc, char **argv, netprobe_config *config)
         if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc && config->mode == MODE_CLIENT) {
             if (parse_duration(argv[i + 1], &config->duration) != 0) {
                 fprintf(stderr, "Invalid duration: %s\n", argv[i + 1]);
+                return -1;
+            }
+            i += 2;
+            continue;
+        }
+
+        if (strcmp(argv[i], "--buffer-size") == 0 && i + 1 < argc && config->mode == MODE_CLIENT) {
+            if (parse_buffer_size(argv[i + 1], &config->buffer_size) != 0) {
+                fprintf(stderr, "Invalid buffer size: %s\n", argv[i + 1]);
                 return -1;
             }
             i += 2;
@@ -393,39 +420,47 @@ static int measure_latency(int fd)
     return 0;
 }
 
-static int measure_throughput(int fd, double duration)
+static int measure_throughput(int fd, double duration, size_t buffer_size)
 {
     unsigned char command = COMMAND_THROUGHPUT;
-    unsigned char buffer[THROUGHPUT_BUFFER_SIZE];
+    unsigned char *buffer;
     struct timespec start;
     struct timespec now;
     size_t total_bytes = 0;
     double elapsed;
     double megabits_per_second;
 
-    memset(buffer, 0, sizeof(buffer));
+    buffer = calloc(buffer_size, 1);
+    if (buffer == NULL) {
+        perror("calloc");
+        return -1;
+    }
 
     if (send_all(fd, &command, sizeof(command)) != 0) {
         perror("send");
+        free(buffer);
         return -1;
     }
 
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
         perror("clock_gettime");
+        free(buffer);
         return -1;
     }
 
     now = start;
     while (elapsed_seconds(&start, &now) < duration) {
-        if (send_all(fd, buffer, sizeof(buffer)) != 0) {
+        if (send_all(fd, buffer, buffer_size) != 0) {
             perror("send");
+            free(buffer);
             return -1;
         }
 
-        total_bytes += sizeof(buffer);
+        total_bytes += buffer_size;
 
         if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
             perror("clock_gettime");
+            free(buffer);
             return -1;
         }
     }
@@ -438,6 +473,7 @@ static int measure_throughput(int fd, double duration)
     printf("Transferred\n");
     printf("  %.2f MB\n", (double)total_bytes / 1000000.0);
 
+    free(buffer);
     return 0;
 }
 
@@ -475,7 +511,7 @@ static int run_server(int port)
     }
 }
 
-static int run_client(const char *host, int port, double duration)
+static int run_client(const char *host, int port, double duration, size_t buffer_size)
 {
     int fd = open_client_socket(host, port);
 
@@ -497,7 +533,7 @@ static int run_client(const char *host, int port, double duration)
         return -1;
     }
 
-    if (measure_throughput(fd, duration) != 0) {
+    if (measure_throughput(fd, duration, buffer_size) != 0) {
         close(fd);
         return -1;
     }
@@ -520,7 +556,7 @@ int main(int argc, char **argv)
             return 1;
         }
     } else {
-        if (run_client(config.host, config.port, config.duration) != 0) {
+        if (run_client(config.host, config.port, config.duration, config.buffer_size) != 0) {
             return 1;
         }
     }
