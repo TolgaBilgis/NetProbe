@@ -11,8 +11,10 @@
 #include "stats.h"
 
 #define DEFAULT_PORT 9000
+#define DEFAULT_DURATION 10.0
 #define LISTEN_BACKLOG 16
 #define IO_BUFFER_SIZE 4096
+#define THROUGHPUT_BUFFER_SIZE 65536
 #define LATENCY_SAMPLES 20
 
 typedef enum {
@@ -30,13 +32,14 @@ typedef struct {
     netprobe_mode mode;
     const char *host;
     int port;
+    double duration;
 } netprobe_config;
 
 static void print_usage(const char *program)
 {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  %s server [--port PORT]\n", program);
-    fprintf(stderr, "  %s client <host> [--port PORT]\n", program);
+    fprintf(stderr, "  %s client <host> [--port PORT] [--duration SECONDS]\n", program);
 }
 
 static int parse_port(const char *value, int *port)
@@ -54,6 +57,21 @@ static int parse_port(const char *value, int *port)
     return 0;
 }
 
+static int parse_duration(const char *value, double *duration)
+{
+    char *end = NULL;
+    double parsed;
+
+    errno = 0;
+    parsed = strtod(value, &end);
+    if (errno != 0 || end == value || *end != '\0' || parsed <= 0.0) {
+        return -1;
+    }
+
+    *duration = parsed;
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, netprobe_config *config)
 {
     int i;
@@ -61,6 +79,7 @@ static int parse_args(int argc, char **argv, netprobe_config *config)
     config->mode = MODE_NONE;
     config->host = NULL;
     config->port = DEFAULT_PORT;
+    config->duration = DEFAULT_DURATION;
 
     if (argc < 2) {
         return -1;
@@ -84,6 +103,15 @@ static int parse_args(int argc, char **argv, netprobe_config *config)
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             if (parse_port(argv[i + 1], &config->port) != 0) {
                 fprintf(stderr, "Invalid port: %s\n", argv[i + 1]);
+                return -1;
+            }
+            i += 2;
+            continue;
+        }
+
+        if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc && config->mode == MODE_CLIENT) {
+            if (parse_duration(argv[i + 1], &config->duration) != 0) {
+                fprintf(stderr, "Invalid duration: %s\n", argv[i + 1]);
                 return -1;
             }
             i += 2;
@@ -295,12 +323,17 @@ static int handle_client(int fd)
     }
 }
 
-static double elapsed_ms(const struct timespec *start, const struct timespec *end)
+static double elapsed_seconds(const struct timespec *start, const struct timespec *end)
 {
     double seconds = (double)(end->tv_sec - start->tv_sec);
     double nanoseconds = (double)(end->tv_nsec - start->tv_nsec);
 
-    return seconds * 1000.0 + nanoseconds / 1000000.0;
+    return seconds + nanoseconds / 1000000000.0;
+}
+
+static double elapsed_ms(const struct timespec *start, const struct timespec *end)
+{
+    return elapsed_seconds(start, end) * 1000.0;
 }
 
 static int measure_latency(int fd)
@@ -360,6 +393,54 @@ static int measure_latency(int fd)
     return 0;
 }
 
+static int measure_throughput(int fd, double duration)
+{
+    unsigned char command = COMMAND_THROUGHPUT;
+    unsigned char buffer[THROUGHPUT_BUFFER_SIZE];
+    struct timespec start;
+    struct timespec now;
+    size_t total_bytes = 0;
+    double elapsed;
+    double megabits_per_second;
+
+    memset(buffer, 0, sizeof(buffer));
+
+    if (send_all(fd, &command, sizeof(command)) != 0) {
+        perror("send");
+        return -1;
+    }
+
+    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+        perror("clock_gettime");
+        return -1;
+    }
+
+    now = start;
+    while (elapsed_seconds(&start, &now) < duration) {
+        if (send_all(fd, buffer, sizeof(buffer)) != 0) {
+            perror("send");
+            return -1;
+        }
+
+        total_bytes += sizeof(buffer);
+
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+            perror("clock_gettime");
+            return -1;
+        }
+    }
+
+    elapsed = elapsed_seconds(&start, &now);
+    megabits_per_second = ((double)total_bytes * 8.0) / (elapsed * 1000000.0);
+
+    printf("Throughput\n");
+    printf("  %.2f Mbps\n", megabits_per_second);
+    printf("Transferred\n");
+    printf("  %.2f MB\n", (double)total_bytes / 1000000.0);
+
+    return 0;
+}
+
 static int run_server(int port)
 {
     int listen_fd = open_listen_socket(port);
@@ -394,7 +475,7 @@ static int run_server(int port)
     }
 }
 
-static int run_client(const char *host, int port)
+static int run_client(const char *host, int port, double duration)
 {
     int fd = open_client_socket(host, port);
 
@@ -405,6 +486,18 @@ static int run_client(const char *host, int port)
     printf("Connected to %s:%d\n", host, port);
 
     if (measure_latency(fd) != 0) {
+        close(fd);
+        return -1;
+    }
+
+    close(fd);
+
+    fd = open_client_socket(host, port);
+    if (fd < 0) {
+        return -1;
+    }
+
+    if (measure_throughput(fd, duration) != 0) {
         close(fd);
         return -1;
     }
@@ -427,7 +520,7 @@ int main(int argc, char **argv)
             return 1;
         }
     } else {
-        if (run_client(config.host, config.port) != 0) {
+        if (run_client(config.host, config.port, config.duration) != 0) {
             return 1;
         }
     }
