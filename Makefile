@@ -6,8 +6,9 @@ LDLIBS ?= -pthread
 TARGET := netprobe
 SRC := src/main.c src/stats.c
 OBJ := $(SRC:.c=.o)
+TEST_TARGET := tests/test_stats
 
-.PHONY: all clean
+.PHONY: all test clean
 
 all: $(TARGET)
 
@@ -17,5 +18,11 @@ $(TARGET): $(OBJ)
 src/%.o: src/%.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
+$(TEST_TARGET): tests/test_stats.c src/stats.c include/stats.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_stats.c src/stats.c -lm -o $@
+
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
 clean:
-	rm -f $(TARGET) $(OBJ)
+	rm -f $(TARGET) $(OBJ) $(TEST_TARGET)
