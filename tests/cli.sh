@@ -16,9 +16,12 @@ expect_failure "unknown mode" ./netprobe probe
 expect_failure "client without host" ./netprobe client
 expect_failure "port below range" ./netprobe server --port 0
 expect_failure "port above range" ./netprobe server --port 65536
+expect_failure "missing port value" ./netprobe server --port
 expect_failure "non-numeric duration" ./netprobe client 127.0.0.1 --duration nope
 expect_failure "zero duration" ./netprobe client 127.0.0.1 --duration 0
+expect_failure "missing duration value" ./netprobe client 127.0.0.1 --duration
 expect_failure "zero buffer size" ./netprobe client 127.0.0.1 --buffer-size 0
+expect_failure "missing buffer size value" ./netprobe client 127.0.0.1 --buffer-size
 expect_failure "server-only client option" ./netprobe server --duration 1
 expect_failure "unknown option" ./netprobe server --bogus
 
