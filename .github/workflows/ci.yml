@@ -16,4 +16,4 @@ jobs:
       - name: CLI tests
         run: sh tests/cli.sh
       - name: Smoke test
-        run: tests/smoke.sh
+        run: sh tests/smoke.sh
