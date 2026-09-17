@@ -11,9 +11,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build
         run: make
-      - name: Unit tests
+      - name: Tests
         run: make test
-      - name: CLI tests
-        run: sh tests/cli.sh
-      - name: Smoke test
-        run: sh tests/smoke.sh
