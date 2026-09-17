@@ -21,8 +21,10 @@ src/%.o: src/%.c
 $(TEST_TARGET): tests/test_stats.c src/stats.c include/stats.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_stats.c src/stats.c -lm -o $@
 
-test: $(TEST_TARGET)
+test: $(TARGET) $(TEST_TARGET)
 	./$(TEST_TARGET)
+	sh tests/cli.sh
+	sh tests/smoke.sh
 
 clean:
 	rm -f $(TARGET) $(OBJ) $(TEST_TARGET)
