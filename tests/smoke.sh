@@ -6,8 +6,13 @@ SERVER_LOG=$(mktemp)
 CLIENT_LOG=$(mktemp)
 SECOND_CLIENT_LOG=$(mktemp)
 SERVER_PID=""
+FIRST_CLIENT_PID=""
 
 cleanup() {
+    if [ -n "$FIRST_CLIENT_PID" ]; then
+        kill "$FIRST_CLIENT_PID" 2>/dev/null || true
+        wait "$FIRST_CLIENT_PID" 2>/dev/null || true
+    fi
     if [ -n "$SERVER_PID" ]; then
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
@@ -34,7 +39,15 @@ grep -Eq '^  [0-9]+\.[0-9]{2} Mbps$' "$CLIENT_LOG"
 grep -q '^Transferred$' "$CLIENT_LOG"
 grep -Eq '^  [0-9]+\.[0-9]{2} MB$' "$CLIENT_LOG"
 
+./netprobe client 127.0.0.1 --port "$PORT" --duration 0.2 --buffer-size 2048 >"$CLIENT_LOG" 2>&1 &
+FIRST_CLIENT_PID=$!
+sleep 0.05
 ./netprobe client 127.0.0.1 --port "$PORT" --duration 0.1 --buffer-size 1024 >"$SECOND_CLIENT_LOG" 2>&1
+wait "$FIRST_CLIENT_PID"
+FIRST_CLIENT_PID=""
+
+grep -q '^Latency$' "$CLIENT_LOG"
+grep -q '^Throughput$' "$CLIENT_LOG"
 grep -q '^Latency$' "$SECOND_CLIENT_LOG"
 grep -q '^Throughput$' "$SECOND_CLIENT_LOG"
 
