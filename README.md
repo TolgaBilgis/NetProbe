@@ -40,18 +40,15 @@ Run a client against it:
 ./netprobe client 127.0.0.1 --port 9000 --duration 10 --buffer-size 65536
 ```
 
-The client runs a latency test first, then opens a new connection for the throughput test.
+The default port is `9000`, the default throughput duration is 10 seconds, and the default buffer size is 64 KiB. The client runs a 20-sample latency test first, then opens a new connection for the throughput test.
 
 ## Tests
 
-Run the latency statistics unit test:
+Build the project and run the full test suite:
 
 ```sh
+make
 make test
 ```
 
-Run the local client/server smoke test after building:
-
-```sh
-sh tests/smoke.sh
-```
+`make test` runs the latency statistics unit tests, command-line validation tests, and a local client/server smoke test. The same test target runs in GitHub Actions on pushes and pull requests.
