@@ -50,6 +50,24 @@ Client options:
 
 The client first opens a connection for the latency test, closes it, then opens a fresh connection for the throughput test. Throughput is reported in Mbps and transferred data in MB.
 
+## Two-node homelab test
+
+I tested NetProbe on my homelab using two nodes on the same network. On `node01`, I started the server:
+
+```sh
+./netprobe server --port 9000
+```
+
+On `node02`, I ran the client using `node01`'s reachable IPv4 address:
+
+```sh
+./netprobe client NODE01_IPV4 --port 9000 --duration 10 --buffer-size 65536
+```
+
+Replace `NODE01_IPV4` with the server node's address. This measures round-trip latency between the nodes and client-observed TCP throughput from `node02` to `node01`. To test the reverse direction, run the server on `node02` and the client on `node01`. The screenshot shows my homelab run with IP addresses hidden; results vary by network and host.
+
+![NetProbe homelab test: node02 client results and node01 server connections, with IP addresses hidden](docs/homelab-two-node-test.png)
+
 ## Tests
 
 Run the complete test suite with:
